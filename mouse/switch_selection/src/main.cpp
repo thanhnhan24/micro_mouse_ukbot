@@ -13,8 +13,9 @@ void motor_move(int pulse_count, int direction, int pwm);
 void motor_turn(int pulse_count, int angle);
 void positon_control();
 void read_sensor();
-void motor_controller(int dir, int pwm);
+void motor_controller(int dir, int target_left_pwm, int target_right_pwm);
 void steering_controller();
+void merge_controller(int dir, float position_pd, float steeing_pd);
 
 int findClosestIndex(int target, int array[], int size);
 
@@ -127,19 +128,47 @@ void selectFunction(int function) {
     Serial.println(side_left);
     Serial.println(side_right);
   } else if (function == 14) {
-    motor_move(FULL_CELL*2, 1, 150);
+    motor_move(FULL_CELL*4, 1, 150);
     delay(500);
-    motor_turn(FULL_CELL/1.3, 90);
+    motor_turn(FULL_CELL/1.7, 90);
   } else if (function == 12) {
    while (isButtonPressed() == false)
    {
-    positon_control();
+    read_sensor();
+    // positon_control();
+    steering_controller();
+    delay(100);
    }
   } else if (function == 11) {
    while (isButtonPressed() == false)
    {
+    read_sensor();
+    positon_control();
     steering_controller();
+    // Serial.print("position_pd: "); Serial.print(position_pd); Serial.print(" steering_pd: "); Serial.println(steering_pd);
+    //Gọi motor_controller dựa trên hướng position_pd
+  if (position_pd > 50) {
+    merge_controller(1, abs(position_pd), steering_pd); // Chạy lui
+  } else if (0 < position_pd && position_pd < 50){
+    merge_controller(1, (abs(position_pd)) / 1.5, steering_pd); // Chạy tiến
+  }
+   else if ( -170 < position_pd && position_pd <  0) {
+    merge_controller(0, abs(position_pd) / 2, steering_pd); // Chạy tiến
+  } else{
+    merge_controller(0, abs(position_pd) / 2.2, steering_pd);  
+  }
    }
+   delay(10);
+  } else if (function == 10) {
+    while (isButtonPressed() == false)
+    {
+    read_sensor();
+    steering_controller();
+    // Serial.print(" steering_pd: "); Serial.println(steering_pd);
+    merge_controller(0, 200, steering_pd);
+    //Gọi motor_controller dựa trên hướng position_pd
+    delay(50);
+    }
   }
 }
 void led_status(float time) {
@@ -258,7 +287,7 @@ void motor_turn(int pulse_count, int angle){
 //controller (in use)
 void positon_control() {
   front_threshold_diff = front_right_threshold - front_left_threshold;
-  read_sensor();
+  //read_sensor();
   front_value_diff = front_right - front_left;
 
   int avr_threshold = (front_left_threshold + front_right_threshold) / 2;
@@ -272,45 +301,43 @@ void positon_control() {
   // Giới hạn PD trong khoảng 0-255 để đảm bảo PWM hợp lệ
   position_pd = constrain(position_pd, -255, 255);
 
-  // Gọi motor_controller dựa trên hướng position_pd
-  if (position_pd > 50) {
-    motor_controller(1, abs(position_pd)); // Chạy lui
-  } else if (0 < position_pd && position_pd < 50){
-    motor_controller(1, (abs(position_pd)/2)); // Chạy tiến
-  }
-   else if ( -170 < position_pd && position_pd <  0) {
-    motor_controller(0, abs(position_pd)/3); // Chạy tiến
-  } else{
-    motor_controller(0, abs(position_pd));  
-  }
-
   // Xuất giá trị lỗi và điều chỉnh
   //Serial.print("Error: "); Serial.print(error);
   //Serial.print(" | position_pd: "); Serial.println(position_pd);
 }
 
-void motor_controller(int dir, int target_pwm) {
-  static int current_pwm = 0;             // PWM hiện tại
+void motor_controller(int dir, int target_left_pwm, int target_right_pwm) {
+  static int current_left_pwm = 0;             // PWM hiện tại
+  static int current_right_pwm = 0;            // PWM hiện tại
   static unsigned long last_update = 0;  // Thời gian cập nhật cuối cùng
   int avr_pulse = (leftPulseCount + rightPulseCount)/2;
   // Kiểm tra nếu đã đến lúc cập nhật PWM
-  positon_control()
   if (millis() - last_update >= delay_between_steps) {
     last_update = millis(); // Cập nhật thời gian
     // Điều chỉnh dần PWM
-    if (current_pwm < target_pwm) {
-      current_pwm += acceleration_step;
-      if (current_pwm > target_pwm) {
-        current_pwm = target_pwm; // Đảm bảo không vượt quá mục tiêu
+    if ( current_left_pwm < target_left_pwm) {
+       current_left_pwm += acceleration_step;
+      if ( current_left_pwm > target_left_pwm) {
+         current_left_pwm = target_left_pwm; // Đảm bảo không vượt quá mục tiêu
       }
-    } else if (current_pwm > target_pwm) {
-      current_pwm -= acceleration_step;
-      if (current_pwm < target_pwm) {
-        current_pwm = target_pwm; // Đảm bảo không vượt quá mục tiêu
+    } else if ( current_left_pwm > target_left_pwm) {
+       current_left_pwm -= acceleration_step;
+      if ( current_left_pwm < target_left_pwm) {
+         current_left_pwm = target_left_pwm; // Đảm bảo không vượt quá mục tiêu
+      }
+    }
+    if ( current_right_pwm < target_right_pwm) {
+       current_right_pwm += acceleration_step;
+      if ( current_right_pwm > target_right_pwm) {
+         current_right_pwm = target_right_pwm; // Đảm bảo không vượt quá mục tiêu
+      }
+    } else if ( current_right_pwm > target_right_pwm) {
+       current_right_pwm -= acceleration_step;
+      if ( current_right_pwm < target_right_pwm) {
+         current_right_pwm = target_right_pwm; // Đảm bảo không vượt quá mục tiêu
       }
     }
   }
-
   // Điều khiển động cơ
   if (dir == 1) {
     // Lùi
@@ -323,29 +350,80 @@ void motor_controller(int dir, int target_pwm) {
   }
 
   // Gửi tín hiệu PWM
-  analogWrite(MOTOR_LEFT_PWM, current_pwm + steeing_pd);
-  analogWrite(MOTOR_RIGHT_PWM, current_pwm - steeing_pd);
+  analogWrite(MOTOR_LEFT_PWM, current_left_pwm);
+  analogWrite(MOTOR_RIGHT_PWM, current_right_pwm);
 
   // In thông tin PWM
-  Serial.print("Current PWM: "); Serial.println(current_pwm);
+  //Serial.print("Current_left_PWM: "); Serial.print(current_left_pwm); Serial.print(" Current_right_PWM: "); Serial.println(current_right_pwm);
   Serial.println("Số cell đi được: " + String((int)((avr_pulse / FULL_CELL) + 0.5)));
-}
+  }
 
 void steering_controller(){
-  read_sensor();
-  int error = side_left - side_right;
-  float steering_pd = error * steeing_Kp + (error - last_steeing_error) * steeing_Kd;
-  last_steeing_error = error;
-  steering_pd = constrain(steering_pd, -50, 50);
-  // Xuất giá trị lỗi và điều chỉnh
-  Serial.print("Error: "); Serial.print(error);
-  Serial.print(" | steering_pd: "); Serial.println(steering_pd);
+  //read_sensor();
+  int last_crawling  = 0; //0 left, 1 right
+  int error;
+  if (side_left > side_left_threshold && side_right > side_right_threshold) {
+    //Serial.println("See both sides");
+    error = side_left - side_right;
+    // Xuất giá trị lỗi và điều chỉnh
+    // Serial.print("Error: "); Serial.print(error);
+    // Serial.print(" | steering_pd: "); Serial.println(steering_pd);
+  } else if (side_left > side_left_threshold/2) {
+    //Serial.println("See left side");
+    error = side_left_threshold - side_left;
+    // Xuất giá trị lỗi và điều chỉnh
+    // Serial.print("left Error: "); Serial.println(error);
+    last_crawling = 0;
+    // Serial.print(" | steering_pd: "); Serial.println(steering_pd);
+  } else if (side_right > side_right_threshold/2) {
+    //Serial.println("See right side");
+    error = -1*(side_right_threshold - side_right);
+    last_crawling = 1;
+    // Xuất giá trị lỗi và điều chỉnh
+    // Serial.print("right Error: "); Serial.print(error);
+    // Serial.print(" | steering_pd: "); Serial.println(steering_pd);
+  } else if(side_left < side_left_threshold/2 && side_right < side_right_threshold/2){
+    if (last_crawling == 0){
+      error = -1 * last_steeing_error;
+    } else
+    {
+      error = -1 * last_steeing_error;
+    }
+
+  }
+    steering_pd = error * steering_Kp + (error - last_steeing_error) * steering_Kd;
+    last_steeing_error = error;
+    steering_pd = constrain(steering_pd, -255, 255);
+    // Xuất giá trị lỗi và điều chỉnh
+    // Serial.print("Error: "); Serial.println(error);
+    // Lệch phải error dương, lệch trái error âm 
+    // Serial.print(" | steering_pd: "); Serial.println(steering_pd);
 }
 
+void merge_controller(int dir ,float position_pd, float steeing_pd){
+  float left_motor_output;
+  float right_motor_output;
+  if (dir == 1){
+    
+    motor_controller(dir, left_motor_output, right_motor_output); 
+
+  } else if (dir == 0){
+    if (steering_pd < 0) {
+     left_motor_output = constrain(position_pd  + steeing_pd,0,255); //left motor output
+     right_motor_output = constrain(position_pd - steeing_pd ,0,255); //right motor output 
+    }
+    else{
+     left_motor_output = constrain(position_pd + steeing_pd,0,255); //left motor output
+     right_motor_output = constrain(position_pd - steeing_pd ,0,255); //right motor output
+    }
+    motor_controller(dir, left_motor_output, right_motor_output); 
+  }
+  // Serial.print("left pwm output: "); Serial.print(left_motor_output); Serial.print(" | right pwm output: "); Serial.print(right_motor_output);
+}
 
 void read_sensor(){
   //activate emitter
-  led_status(0.1);
+  led_status(0.5);
   digitalWrite(EMITTER_FRONT, HIGH);
   digitalWrite(EMITTER_SIDE, HIGH);
   //read sensor data
